@@ -110,6 +110,16 @@ dialog::backdrop{background:rgba(0,0,0,.35);}
 </style>
 </head>
 <body>
+<div id="loginOverlay" style="position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#5A3D26,#7B4B2A);display:flex;align-items:center;justify-content:center">
+  <div style="width:80%;max-width:340px;background:#FFF;border-radius:16px;padding:24px 20px 20px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.25)">
+    <div style="font-size:34px;margin-bottom:6px">🪷</div>
+    <div style="font-size:18px;font-weight:bold;color:var(--ink);letter-spacing:1px">惠君香堂 · 进销存</div>
+    <div style="font-size:12px;color:var(--ink2);margin:4px 0 16px">请输入访问密码后进入</div>
+    <input id="loginPwd" type="password" placeholder="密码" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:18px;text-align:center;letter-spacing:4px;box-sizing:border-box" autocomplete="off">
+    <div id="loginErr" style="color:var(--danger);font-size:12px;min-height:18px;margin-top:6px"></div>
+    <button id="loginBtn" style="width:100%;margin-top:6px;background:var(--gold);color:#FFF;border:none;border-radius:8px;padding:12px;font-size:16px;letter-spacing:4px">登 录</button>
+  </div>
+</div>
 <div id="app">
   <header>
     <h1>🪷 惠君香堂 · 进销存
@@ -144,10 +154,17 @@ dialog::backdrop{background:rgba(0,0,0,.35);}
         <div class="field"><label>颜色</label><input id="p_color" placeholder="如：棕褐/金橙"></div>
         <div class="field"><label>大小/规格</label><input id="p_size" placeholder="如：6mm / 8mm"></div>
       </div>
-      <div class="grid2">
-        <div class="field"><label>花型/品类</label><input id="p_pattern" placeholder="如：合香/盘香"></div>
-        <div class="field"><label>配饰</label><input id="p_acce" placeholder="如：玛瑙/流苏"></div>
+      <button type="button" class="btn ghost small block" style="margin:2px 0 4px" onclick="toggleMultiSpec()">📎 添加多项规格（同品名·可不同价）</button>
+      <div id="multiSpecBox" style="display:none;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:4px">
+        <div style="font-size:11px;color:var(--ink2);margin-bottom:6px">每行一项规格，保存时自动生成同品名的多条商品，可分别设价格和库存</div>
+        <div id="multiSpecRows"></div>
+        <button type="button" class="btn ghost small" onclick="addSpecRow()">＋ 增加一行</button>
       </div>
+      <div class="grid2">
+        <div class="field"><label>品类</label><select id="p_pattern" onchange="syncSpecField()"><option value="">请选择品类</option><option value="配饰">配饰</option><option value="合香">合香</option></select></div>
+        <div class="field"><label>功能</label><input id="p_acce" placeholder="如：随身佩戴/安神养生"></div>
+      </div>
+      <div class="field"><label id="bwLabel">配伍</label><input id="p_bw" placeholder="如：沉香+檀香+乳香"></div>
       <div class="grid2">
         <div class="field"><label>进价 (元)</label><input id="p_buy" type="number" inputmode="decimal" placeholder="成本"></div>
         <div class="field"><label>售价 (元)</label><input id="p_sell" type="number" inputmode="decimal" placeholder="零售"></div>
@@ -214,7 +231,7 @@ function nowStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMont
 function today(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
-function specOf(p){return [p.color,p.size,p.pattern,p.acce].filter(x=>x).join('·')||'—';}
+function specOf(p){return [p.color,p.size,p.pattern,p.acce,p.bw].filter(x=>x).join('·')||'—';}
 function num(v){const n=parseFloat(v);return isNaN(n)?0:n;}
 function openDlg(id){document.getElementById(id).showModal();}
 function closeDlg(id){document.getElementById(id).close();}
@@ -263,7 +280,7 @@ function renderHome(){
 let stockKw='';
 function renderStock(){
   const kw=(stockKw||'').toLowerCase();
-  let h='<div class="searchbar"><input placeholder="🔍 搜索 品名/颜色/大小/花型/配饰" value="'+esc(stockKw)+'" oninput="stockKw=this.value;renderStock()"></div>';
+  let h='<div class="searchbar"><input placeholder="🔍 搜索 品名/颜色/大小/花型/功能/配伍" value="'+esc(stockKw)+'" oninput="stockKw=this.value;renderStock()"></div>';
   h+='<button class="btn gold block" onclick="newProduct()">➕ 新增商品</button>';
   h+='<div style="height:10px"></div>';
   const list=PRODS.filter(p=>{
@@ -290,7 +307,32 @@ function renderStock(){
 
 /* 商品表单 */
 let curEditId=null, pendPhotos=[];
-function newProduct(){curEditId=null;pendPhotos=[];$('p_name').value='';$('p_color').value='';$('p_size').value='';$('p_pattern').value='';$('p_acce').value='';$('p_buy').value='';$('p_sell').value='';$('p_stock').value='0';$('p_note').value='';$('p_photos').innerHTML=defaultPhotoUI();$('prodDlgTitle').textContent='➕ 新增商品';openDlg('prodDialog');}
+function toggleMultiSpec(){
+  var b=document.getElementById('multiSpecBox');
+  if(!b)return;
+  var show=b.style.display==='none';
+  b.style.display=show?'block':'none';
+  if(show && !document.getElementById('multiSpecRows').children.length){addSpecRow();}
+}
+function addSpecRow(){
+  var d=document.createElement('div');
+  d.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px';
+  d.innerHTML='<input placeholder="规格，如 6mm" style="flex:1.2;min-width:0;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">'+
+    '<input placeholder="进价" type="number" style="flex:.8;min-width:0;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">'+
+    '<input placeholder="售价" type="number" style="flex:.8;min-width:0;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">'+
+    '<input placeholder="库存" type="number" value="0" style="flex:.6;min-width:0;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px">'+
+    '<button type="button" style="border:none;background:none;color:var(--danger);font-size:16px" onclick="this.parentNode.remove()">✕</button>';
+  document.getElementById('multiSpecRows').appendChild(d);
+}
+function syncSpecField(){
+  var pat=document.getElementById('p_pattern').value;
+  var lbl=document.getElementById('bwLabel');
+  var inp=document.getElementById('p_bw');
+  if(pat==='配饰'){lbl.textContent='材质';inp.placeholder='如：玛瑙/纯银/南红';}
+  else if(pat==='合香'){lbl.textContent='配伍';inp.placeholder='如：沉香+檀香+乳香';}
+  else{lbl.textContent='配伍/材质';inp.placeholder='先选品类再填写';}
+}
+function newProduct(){curEditId=null;pendPhotos=[];$('p_name').value='';$('p_color').value='';$('p_size').value='';$('p_pattern').value='';$('p_acce').value='';$('p_bw').value='';$('p_buy').value='';$('p_sell').value='';$('p_stock').value='0';$('p_note').value='';$('p_photos').innerHTML=defaultPhotoUI();$('prodDlgTitle').textContent='➕ 新增商品';document.getElementById('multiSpecRows').innerHTML='';document.getElementById('multiSpecBox').style.display='none';syncSpecField();openDlg('prodDialog');}
 function defaultPhotoUI(){
   let h='<input type="file" accept="image/*" capture="environment" id="cam0" style="display:none">';
   h+='<div class="addPhoto" onclick="pickPhoto()"><b>＋</b>拍照/选图</div>';
@@ -332,20 +374,36 @@ function renderPhotoList(){
 function saveProduct(){
   const name=$('p_name').value.trim();
   if(!name){toast('请填写品名');return;}
+  // 收集多规格行
+  const mspecs=[];
+  document.querySelectorAll('#multiSpecRows > div').forEach(function(r){
+    const ins=r.querySelectorAll('input');
+    const label=ins[0].value.trim();
+    if(label){mspecs.push({label:label,buy:num(ins[1].value),sell:num(ins[2].value),stock:num(ins[3].value)>0?num(ins[3].value):0});}
+  });
+  const common={color:$('p_color').value.trim(), pattern:$('p_pattern').value, acce:$('p_acce').value.trim(), bw:$('p_bw').value.trim(), note:$('p_note').value.trim()};
+  // 新增 + 有多规格 → 批量生成同品名多条商品
+  if(!curEditId && mspecs.length){
+    mspecs.forEach(function(sp){
+      const o=Object.assign({id:uid(), name:name, size:sp.label, thumb:pendPhotos[0]||''}, common, {buy:sp.buy, sell:sp.sell, stock:sp.stock});
+      PRODS.push(o);
+      if(pendPhotos.length){idbPut('p_'+o.id, pendPhotos);}
+    });
+    closeDlg('prodDialog');saveData();curEditId=null;renderStock();renderHome();
+    toast('已生成 '+mspecs.length+' 条同品名商品（多规格）');
+    return;
+  }
   const obj={
     id:curEditId||uid(),
     name:name,
-    color:$('p_color').value.trim(), size:$('p_size').value.trim(), pattern:$('p_pattern').value.trim(), acce:$('p_acce').value.trim(),
+    color:common.color, size:$('p_size').value.trim(), pattern:common.pattern, acce:common.acce, bw:common.bw,
     buy:num($('p_buy').value), sell:num($('p_sell').value), stock:num($('p_stock').value)>0?num($('p_stock').value):0,
-    note:$('p_note').value.trim(), thumb:pendPhotos[0]||'',
+    note:common.note, thumb:pendPhotos[0]||'',
   };
   const idx=PRODS.findIndex(p=>p.id===obj.id);
   if(idx>=0){PRODS[idx]=Object.assign(PRODS[idx],obj);}
   else{PRODS.push(obj);}
-  // 照片存IDB
-  if(pendPhotos.length){
-    idbPut('p_'+obj.id, pendPhotos);
-  }
+  if(pendPhotos.length){idbPut('p_'+obj.id, pendPhotos);}
   saveData();closeDlg('prodDialog');toast(curEditId?'已更新':'已保存');curEditId=null;renderStock();renderHome();
 }
 
@@ -387,7 +445,7 @@ function stockChange(id,delta){
 function editProduct(id){
   const p=PRODS.find(x=>x.id===id);if(!p)return;closeDlg('detailDialog');
   curEditId=id;pendPhotos=[];
-  $('p_name').value=p.name;$('p_color').value=p.color;$('p_size').value=p.size;$('p_pattern').value=p.pattern;$('p_acce').value=p.acce;
+  $('p_name').value=p.name;$('p_color').value=p.color;$('p_size').value=p.size;$('p_pattern').value=p.pattern;$('p_acce').value=p.acce;$('p_bw').value=p.bw||'';syncSpecField();
   $('p_buy').value=p.buy;$('p_sell').value=p.sell;$('p_stock').value=p.stock;$('p_note').value=p.note;
   // load photos
   idbGet('p_'+id).then(list=>{pendPhotos=list||[];renderPhotoList();});
@@ -406,7 +464,7 @@ function copyProduct(id){
 }
 function dupProduct(id){
   const p=PRODS.find(x=>x.id===id);if(!p)return;
-  const np={id:uid(),name:p.name,color:p.color,size:p.size,pattern:p.pattern,acce:p.acce,buy:p.buy,sell:p.sell,stock:p.stock,note:p.note,thumb:p.thumb};
+  const np={id:uid(),name:p.name,color:p.color,size:p.size,pattern:p.pattern,acce:p.acce,bw:p.bw,buy:p.buy,sell:p.sell,stock:p.stock,note:p.note,thumb:p.thumb};
   PRODS.push(np);
   // 尽力复制照片；无论成功失败，都立即打开编辑框（照片复制不阻塞）
   idbGet('p_'+p.id)
@@ -620,8 +678,8 @@ function renderMore(){
   $('pane-more').innerHTML=h;
 }
 function exportStock(){
-  const rows=[['品名','颜色','大小','花型','配饰','进价','售价','库存','备注']];
-  PRODS.forEach(p=>rows.push([p.name,p.color,p.size,p.pattern,p.acce,p.buy,p.sell,p.stock,p.note]));
+  const rows=[['品名','颜色','大小','品类','功能','配伍/材质','进价','售价','库存','备注']];
+  PRODS.forEach(p=>rows.push([p.name,p.color,p.size,p.pattern,p.acce,p.bw,p.buy,p.sell,p.stock,p.note]));
   downloadCSV('惠君香堂_库存_'+today()+'.csv',rows);
 }
 function exportSale(){
@@ -658,10 +716,24 @@ function copyLowStock(){
   copyText('【惠君香堂 · 低库存提醒】\n'+txt);
 }
 
+/* ============ 登录 ============ */
+var LOGIN_PASSWORD='0902';
+function doLogin(){
+  var v=document.getElementById('loginPwd').value;
+  var err=document.getElementById('loginErr');
+  if(v===LOGIN_PASSWORD){
+    document.getElementById('loginOverlay').style.display='none';
+    switchPane('pane-home');
+  }else{
+    err.textContent='密码错误，请重新输入';
+    document.getElementById('loginPwd').value='';
+    document.getElementById('loginPwd').focus();
+  }
+}
+document.getElementById('loginBtn').onclick=doLogin;
+document.getElementById('loginPwd').addEventListener('keydown',function(e){if(e.key==='Enter'){doLogin();}});
 /* ============ 初始化 ============ */
 loadData();
-// 照片IDB可用性检测
-switchPane('pane-home');
 </script>
 </body>
 </html>
